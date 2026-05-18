@@ -1,49 +1,60 @@
-const express = require('express');
-const path = require('path');
-const staticRoute = require('./routes/staticRouter'); 
+const express = require("express");
+const path = require("path");
+const cookieParser = require("cookie-parser");
 
-const {connectToMongoDb} = require('./connection');
-const urlRoute = require('./routes/url');
-const URL = require('./models/url');
+const { connectToMongoDb } = require("./connection");
+const staticRoute = require("./routes/staticRouter");
+const urlRoute = require("./routes/url");
+const userRoute = require("./routes/user");
+const URL = require("./models/url");
+const { restrictToLoggedinUserOnly, checkAuth } = require("./middleware/auth");
 
 const app = express();
 
-connectToMongoDb('mongodb://127.0.0.1:27017/url-short')
-    .then(() => console.log("MongoDB connected"));
+connectToMongoDb("mongodb://127.0.0.1:27017/url-short").then(() =>
+  console.log("MongoDB connected"),
+);
 
-
-app.set('view engine', 'ejs');
-app.set('views', path.resolve('./views'));
+app.set("view engine", "ejs");
+app.set("views", path.resolve("./views"));
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
+app.use(cookieParser());
 
-app.use('/url', urlRoute);
-app.use('/', staticRoute);
+app.use("/url", restrictToLoggedinUserOnly, urlRoute);
+app.use("/", checkAuth, staticRoute);
+app.use("/user", userRoute);
 
-app.get('/test', async (req, res) => {
-    const allUrls = await URL.find({});
-    return res.render('home', {
-        urls: allUrls,
-    });
+app.get("/favicon.ico", (req, res) => res.status(204).end());
+
+app.get("/test", async (req, res) => {
+  const allUrls = await URL.find({});
+  return res.render("home", {
+    urls: allUrls,
+  });
 });
 
-app.get('/:shortId', async (req, res) => {
-    const shortId = req.params.shortId;
-    const entry = await URL.findOneAndUpdate(
-        {
-            shortId,
+app.get("/:shortId", async (req, res) => {
+  const shortId = req.params.shortId;
+  const entry = await URL.findOneAndUpdate(
+    {
+      shortId,
+    },
+    {
+      $push: {
+        visitHistory: {
+          timestamp: Date.now(),
         },
-        {
-            $push: {
-                visitHistory: {
-                    timestamp: Date.now(),
-                }
-            }
-        }
-    );
+      },
+    },
+  );
 
-    res.redirect(entry.redirectUrl);
+  if (!entry) {
+    return res.status(404).send("Short URL not found");
+  }
+
+  res.redirect(entry.redirectUrl);
 });
 
 app.listen(8001, () => console.log("Server started at 8001"));
